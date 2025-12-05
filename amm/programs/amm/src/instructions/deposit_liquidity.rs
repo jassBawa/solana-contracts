@@ -154,8 +154,8 @@ pub fn deposit_liquidity(
 
 #[derive(Accounts)]
 pub struct DepositLiquidity<'info> {
-    pub mint_a: Box<Account<'info, Mint>>,
-    pub mint_b: Box<Account<'info, Mint>>,
+    pub mint_a: Account<'info, Mint>,
+    pub mint_b: Account<'info, Mint>,
 
     #[account(
         mut,
@@ -168,7 +168,7 @@ pub struct DepositLiquidity<'info> {
         has_one = mint_a,
         has_one = mint_b,
     )]
-    pub pool: Box<Account<'info, Pool>>,
+    pub pool: Account<'info, Pool>,
 
     /// CHECK: Read only authority
     #[account(
@@ -194,21 +194,21 @@ pub struct DepositLiquidity<'info> {
         bump,
         mint::authority = pool_authority
     )]
-    pub mint_liquidity: Box<Account<'info, Mint>>,
+    pub mint_liquidity: Account<'info, Mint>,
 
     #[account(
         mut,
         associated_token::mint = mint_a,
         associated_token::authority = pool_authority
     )]
-    pub pool_account_a: Box<Account<'info, TokenAccount>>,
+    pub pool_account_a: Account<'info, TokenAccount>,
 
     #[account(
         mut,
         associated_token::mint = mint_b,
         associated_token::authority = pool_authority
     )]
-    pub pool_account_b: Box<Account<'info, TokenAccount>>,
+    pub pool_account_b: Account<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
@@ -216,13 +216,13 @@ pub struct DepositLiquidity<'info> {
         associated_token::mint = mint_liquidity,
         associated_token::authority = depositor,
     )]
-    pub depositer_mint_lp_ata: Box<Account<'info, TokenAccount>>,
+    pub depositer_mint_lp_ata: Account<'info, TokenAccount>,
 
     #[account(mut, associated_token::mint = mint_a, associated_token::authority = depositor)]
-    pub depositer_mint_a_ata: Box<Account<'info, TokenAccount>>,
+    pub depositer_mint_a_ata: Account<'info, TokenAccount>,
 
     #[account(mut, associated_token::mint = mint_b, associated_token::authority = depositor)]
-    pub depositer_mint_b_ata: Box<Account<'info, TokenAccount>>,
+    pub depositer_mint_b_ata: Account<'info, TokenAccount>,
 
     #[account(mut)]
     pub depositor: Signer<'info>,

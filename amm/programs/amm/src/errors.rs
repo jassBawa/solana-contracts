@@ -16,4 +16,10 @@ pub enum ErrorType {
 
     #[msg("Invariant does not hold")]
     InvariantViolated,
+
+    #[msg("You don't have enough liqudity (LP tokens) ")]
+    InsufficientLiquidity,
+
+    #[msg("You dont have sufficient funds to withdraw")]
+    ZeroWithdrawal,
 }

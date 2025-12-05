@@ -25,6 +25,7 @@ pub struct CreateAmm<'info> {
     )]
     pub amm: Account<'info, Amm>,
 
+    /// CHECK: Admin is provided by client; only its pubkey is used for authority.
     pub admin: AccountInfo<'info>,
 
     #[account(mut)]

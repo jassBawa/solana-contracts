@@ -23,7 +23,7 @@ pub struct CreatePool<'info> {
         seeds=[amm.id.as_ref()],
         bump
     )]
-    pub amm: Box<Account<'info, Amm>>,
+    pub amm: Account<'info, Amm>,
 
     #[account(
         init,
@@ -36,9 +36,9 @@ pub struct CreatePool<'info> {
         ],
         bump
     )]
-    pub pool: Box<Account<'info, Pool>>,
+    pub pool: Account<'info, Pool>,
 
-    /// CHECK: Read only authority
+    /// CHECK: PDA, safe because seeds are verified
     #[account(
         seeds=[
             amm.key().as_ref(),
@@ -48,7 +48,7 @@ pub struct CreatePool<'info> {
         ],
         bump
     )]
-    pub pool_authority: AccountInfo<'info>,
+    pub pool_authority: UncheckedAccount<'info>,
 
     #[account(
         init,
@@ -59,15 +59,14 @@ pub struct CreatePool<'info> {
             mint_b.key().as_ref(),
             LIQUIDITY_SEED,
         ],
-
         bump,
         mint::decimals = 6,
         mint::authority = pool_authority
     )]
-    pub mint_liqudity: Box<Account<'info, Mint>>, // for minting lptokens
+    pub mint_liqudity: Account<'info, Mint>, // for minting lptokens
 
-    pub mint_a: Box<Account<'info, Mint>>,
-    pub mint_b: Box<Account<'info, Mint>>,
+    pub mint_a: Account<'info, Mint>,
+    pub mint_b: Account<'info, Mint>,
 
     #[account(
         init,
@@ -75,7 +74,7 @@ pub struct CreatePool<'info> {
         associated_token::mint = mint_a,
         associated_token::authority = pool_authority
     )]
-    pub pool_account_a: Box<Account<'info, TokenAccount>>,
+    pub pool_account_a: Account<'info, TokenAccount>,
 
     #[account(
         init,
@@ -83,7 +82,7 @@ pub struct CreatePool<'info> {
         associated_token::mint = mint_b,
         associated_token::authority = pool_authority
     )]
-    pub pool_account_b: Box<Account<'info, TokenAccount>>,
+    pub pool_account_b: Account<'info, TokenAccount>,
 
     #[account(mut)]
     pub payer: Signer<'info>,
