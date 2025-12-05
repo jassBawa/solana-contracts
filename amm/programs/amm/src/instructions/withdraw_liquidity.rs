@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{self, Burn, Mint, Token, TokenAccount, Transfer},
+};
 use fixed::types::I64F64;
 
 use crate::{
@@ -95,7 +98,7 @@ pub struct WithdrawLiquidity<'info> {
         seeds=[amm.id.as_ref()],
         bump
     )]
-    pub amm: Account<'info, Amm>,
+    pub amm: Box<Account<'info, Amm>>,
 
     pub mint_a: Account<'info, Mint>,
     pub mint_b: Account<'info, Mint>,
@@ -124,7 +127,7 @@ pub struct WithdrawLiquidity<'info> {
         has_one = mint_a,
         has_one = mint_b
     )]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
 
     /// CHECK: This is a PDA derived from known seeds; Anchor verifies the seeds and bump.
     #[account(
@@ -158,7 +161,7 @@ pub struct WithdrawLiquidity<'info> {
     #[account(
         mut,
         associated_token::mint = mint_liquidity,
-        associated_token::authority = pool_authority
+        associated_token::authority = depositer
     )]
     pub depositer_account_token_lp: Account<'info, TokenAccount>,
 
@@ -185,6 +188,6 @@ pub struct WithdrawLiquidity<'info> {
     pub payer: Signer<'info>,
 
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }

@@ -38,7 +38,7 @@ pub mod swap_example {
         instructions::swap_tokens_for_tokens(ctx, swap_a, input_amount, min_output_amount)
     }
 
-    pub fn withdraw_liqudity(ctx: Context<WithdrawLiquidity>, amount: u64) -> Result<()> {
+    pub fn withdraw_liquidity(ctx: Context<WithdrawLiquidity>, amount: u64) -> Result<()> {
         instructions::withdraw_liquidity(ctx, amount)
     }
 }

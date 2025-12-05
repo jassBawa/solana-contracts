@@ -122,7 +122,7 @@ describe("Deposit liquidity", () => {
     const finalBalanceB = await connection.getTokenAccountBalance(
       values.holderAccountB
     );
-    expect(finalBalanceB.value.amount).to.equal(initialBalanceA.value.amount);
+    expect(finalBalanceB.value.amount).to.equal(initialBalanceB.value.amount);
 
     const liquidityAccountInfo = await connection.getAccountInfo(
       values.liquidityAccount
