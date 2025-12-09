@@ -43,8 +43,7 @@ describe("lock_tokens", () => {
     "hex"
   );
   const mintDecimals = 9;
-  const lockAmount = new anchor.BN(1000 * 10 ** mintDecimals); // 1000 tokens per lock
-
+  const lockAmount = new anchor.BN(1000 * 10 ** mintDecimals);
   before(async () => {
     // Generate keypairs
     admin = Keypair.generate();
@@ -65,7 +64,6 @@ describe("lock_tokens", () => {
     );
     await provider.connection.confirmTransaction(userAirdrop);
 
-    // Derive PDAs
     [configPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("bridge"), tokenMint.publicKey.toBuffer()],
       program.programId
@@ -87,7 +85,6 @@ describe("lock_tokens", () => {
       user.publicKey
     );
 
-    // Step 1: Create the token mint
     const mintRent = await getMinimumBalanceForRentExemptMint(
       provider.connection
     );
@@ -110,7 +107,6 @@ describe("lock_tokens", () => {
 
     await provider.sendAndConfirm(createMintTx, [admin, tokenMint]);
 
-    // Step 2: Initialize the bridge
     await program.methods
       .initialize(
         destinationChainId,
@@ -124,7 +120,6 @@ describe("lock_tokens", () => {
       .signers([admin])
       .rpc();
 
-    // Step 3: Create user's associated token account
     try {
       await getAccount(provider.connection, userTokenAccount);
     } catch (error) {
@@ -139,7 +134,6 @@ describe("lock_tokens", () => {
       await provider.sendAndConfirm(createAtaTx, [admin]);
     }
 
-    // Step 4: Mint tokens to user (enough for 5 locks: 5000 tokens)
     const totalTokensNeeded = new anchor.BN(5000 * 10 ** mintDecimals);
     const mintToTx = new anchor.web3.Transaction().add(
       createMintToInstruction(
@@ -154,7 +148,7 @@ describe("lock_tokens", () => {
   });
 
   it("Successfully locks tokens 5 times and verifies nonce increments", async () => {
-    console.log("\n=== Starting 5 consecutive lock operations ===\n");
+    console.log("\n Starting 5 consecutive lock operations\n");
     console.log("Config PDA:", configPda.toString());
     console.log("User:", user.publicKey.toString());
     console.log("Token Mint:", tokenMint.publicKey.toString());
@@ -189,14 +183,12 @@ describe("lock_tokens", () => {
     for (let i = 0; i < 5; i++) {
       console.log(`--- Lock Operation ${i + 1}/5 ---`);
 
-      // Generate unique destination address for each lock
       const destinationAddress = Buffer.from(
         `0x${(i + 1).toString().padStart(2, "0").repeat(20)}`.slice(2),
         "hex"
       );
       destinationAddresses.push(destinationAddress);
 
-      // Derive lock record PDA
       const nonceBuffer = Buffer.allocUnsafe(8);
       nonceBuffer.writeBigUInt64LE(BigInt(expectedNonce), 0);
       const [lockRecordPda] = PublicKey.findProgramAddressSync(
@@ -205,7 +197,6 @@ describe("lock_tokens", () => {
       );
       lockRecords.push(lockRecordPda);
 
-      // Get balances before this lock
       const userAccount = await getAccount(
         provider.connection,
         userTokenAccount
@@ -233,7 +224,6 @@ describe("lock_tokens", () => {
 
       console.log(`  Transaction: ${tx}`);
 
-      // Verify lock record
       const lockRecord = await program.account.lockRecord.fetch(lockRecordPda);
       expect(lockRecord.config.toString()).to.equal(configPda.toString());
       expect(lockRecord.nonce.toNumber()).to.equal(expectedNonce);
@@ -243,12 +233,10 @@ describe("lock_tokens", () => {
         destinationAddress
       );
 
-      // Verify config nonce was incremented
       const configAfter = await program.account.bridgeConfig.fetch(configPda);
       expectedNonce = expectedNonce + 1;
       expect(configAfter.nonce.toNumber()).to.equal(expectedNonce);
 
-      // Verify balances
       const userAccountAfter = await getAccount(
         provider.connection,
         userTokenAccount
@@ -262,7 +250,6 @@ describe("lock_tokens", () => {
       console.log(`  New nonce: ${configAfter.nonce.toNumber()}`);
       console.log(`   Lock ${i + 1} successful\n`);
 
-      // Verify token transfer
       expect(userBalanceAfter).to.equal(userBalance - lockAmount.toNumber());
       expect(vaultBalanceAfter).to.equal(
         vaultBalanceBefore + lockAmount.toNumber()
@@ -271,7 +258,6 @@ describe("lock_tokens", () => {
       vaultBalanceBefore = vaultBalanceAfter;
     }
 
-    // Final verification
     const finalConfig = await program.account.bridgeConfig.fetch(configPda);
     const finalUserAccount = await getAccount(
       provider.connection,
@@ -282,7 +268,7 @@ describe("lock_tokens", () => {
       tokenVaultPda
     );
 
-    console.log("=== Final State ===");
+    console.log("Final State");
     console.log(`Final nonce: ${finalConfig.nonce.toNumber()}`);
     console.log(`Expected nonce: ${initialNonce + 5}`);
     console.log(`Final user balance: ${Number(finalUserAccount.amount)}`);
@@ -298,8 +284,6 @@ describe("lock_tokens", () => {
       initialVaultBalance + 5 * lockAmount.toNumber()
     );
 
-    // Verify all lock records
-    console.log("\n=== Verifying all lock records ===");
     for (let i = 0; i < 5; i++) {
       const lockRecord = await program.account.lockRecord.fetch(lockRecords[i]);
       expect(lockRecord.nonce.toNumber()).to.equal(initialNonce + i);

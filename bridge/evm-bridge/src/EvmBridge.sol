@@ -113,7 +113,6 @@ contract EvmBridge {
             revert AlreadyProcessed(messageId);
         }
 
-        // Mark processed BEFORE mint
         processedMessages[messageId] = true;
 
         // Mint wrapped tokens

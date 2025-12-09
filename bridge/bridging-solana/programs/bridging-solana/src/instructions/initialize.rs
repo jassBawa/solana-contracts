@@ -13,6 +13,7 @@ pub fn initialize_bridge(
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
 
+    // admin for withdrawing and pausing tokens locks (will cover in v2)
     config.admin = ctx.accounts.admin.key();
     config.token_mint = ctx.accounts.token_mint.key();
     config.vault_authority_bump = ctx.bumps.vault_authority;
@@ -58,7 +59,5 @@ pub struct InitializeBridge<'info> {
 
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    // why we need this
-    pub rent: Sysvar<'info, Rent>,
     pub associated_token_program: Program<'info, AssociatedToken>,
 }

@@ -1,15 +1,9 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { BridgingSolana } from "../target/types/bridging_solana";
-import {
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  SYSVAR_RENT_PUBKEY,
-} from "@solana/web3.js";
+import { Keypair, PublicKey, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
   MINT_SIZE,
   createInitializeMintInstruction,
   getMinimumBalanceForRentExemptMint,
@@ -32,11 +26,11 @@ describe("bridging-solana", () => {
   let tokenVaultPda: PublicKey;
 
   // Test parameters
-  const destinationChainId = new anchor.BN(1); // Ethereum mainnet
+  const destinationChainId = new anchor.BN(1);
   const destinationBridge = Buffer.from(
     "0x1234567890123456789012345678901234567890".slice(2),
     "hex"
-  ); // 20 bytes
+  );
   const mintDecimals = 9;
 
   before(async () => {
@@ -66,13 +60,12 @@ describe("bridging-solana", () => {
     tokenVaultPda = await getAssociatedTokenAddress(
       tokenMint.publicKey,
       vaultAuthorityPda,
-      true // allowOwnerOffCurve
+      true
     );
   });
 
   describe("initialize", () => {
     it("Successfully initializes the bridge with valid parameters", async () => {
-      // Step 1: Create the token mint
       const mintRent = await getMinimumBalanceForRentExemptMint(
         provider.connection
       );
@@ -89,13 +82,12 @@ describe("bridging-solana", () => {
           tokenMint.publicKey,
           mintDecimals,
           admin.publicKey,
-          null // freeze authority
+          null
         )
       );
 
       await provider.sendAndConfirm(createMintTx, [admin, tokenMint]);
 
-      // Step 2: Initialize the bridge
       const tx = await program.methods
         .initialize(
           destinationChainId,
@@ -111,7 +103,6 @@ describe("bridging-solana", () => {
 
       console.log("Initialize transaction signature:", tx);
 
-      // Step 3: Verify the bridge config was initialized correctly
       const configAccount = await program.account.bridgeConfig.fetch(configPda);
 
       expect(configAccount.admin.toString()).to.equal(
@@ -143,7 +134,6 @@ describe("bridging-solana", () => {
     });
 
     it("Fails to initialize bridge twice with same token mint", async () => {
-      // Try to initialize again with the same token mint
       try {
         await program.methods
           .initialize(
@@ -161,7 +151,6 @@ describe("bridging-solana", () => {
         expect.fail("Should have thrown an error");
       } catch (err) {
         expect(err).to.be.instanceOf(Error);
-        // Account already exists error
         expect(err.toString()).to.include("already in use");
       }
     });

@@ -155,6 +155,7 @@ async fn submit_to_evm(msg: &BridgeMessage) -> Result<()> {
     let wallet: LocalWallet = private_key.parse()?;
     let wallet = wallet.with_chain_id(chain_id);
 
+    // why not using things like this wallet.sign_transaction because
     // Signermiddleware will handle this thigns autoamaticallly
     // 1. Build correct calldata
     // 2. Choose correct nonce
@@ -166,8 +167,6 @@ async fn submit_to_evm(msg: &BridgeMessage) -> Result<()> {
     // 8. Retry safely
     // wallet.sign_transaction() does only 5(sign)
     let client = Arc::new(SignerMiddleware::new(provider, wallet));
-
-    // why not using things like this wallet.sign_transaction
 
     let bridge_address: EvmAddress = bridge_address.parse()?;
     let abi: Abi = serde_json::from_str(EVM_BRIDGE_ABI)?;
