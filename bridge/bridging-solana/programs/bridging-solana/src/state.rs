@@ -10,6 +10,7 @@ pub struct BridgeConfig {
     pub destination_chain_id: u64,
     pub destination_bridge: [u8; 20],
     pub relayer_pubkey: Pubkey,
+    pub paused: bool,
 }
 
 #[account]

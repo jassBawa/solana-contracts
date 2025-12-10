@@ -7,4 +7,16 @@ pub enum ErrorCode {
 
     #[msg("Amount must be greater than zero")]
     InvalidAmount,
+
+    #[msg("You are not admin")]
+    UnauthorizedAdmin,
+
+    #[msg("Bridge is Paused")]
+    BridgePaused,
+
+    #[msg("Bridge locking is paused")]
+    AlreadyPaused,
+
+    #[msg("Bridge is not paused")]
+    NotPaused,
 }
