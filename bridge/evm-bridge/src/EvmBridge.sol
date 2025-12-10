@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-
 contract WrappedToken {
     string public name = "Wrapped Solana Token";
     string public symbol = "wSOLT";
@@ -11,8 +10,14 @@ contract WrappedToken {
     address public minter;
 
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(
+        address indexed owner,
+        address indexed spender,
+        uint256 value
+    );
     event MinterUpdated(address indexed newMinter);
 
     modifier onlyMinter() {
@@ -30,14 +35,31 @@ contract WrappedToken {
         emit MinterUpdated(_minter);
     }
 
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
     function mint(address to, uint256 amount) external onlyMinter {
         require(to != address(0), "zero address");
         totalSupply += amount;
         balanceOf[to] += amount;
         emit Transfer(address(0), to, amount);
     }
-}
 
+    function burnFrom(address from, uint256 amount) external {
+        uint256 allowed = allowance[from][msg.sender];
+        require(allowed >= amount, "allowance low");
+        require(balanceOf[from] >= amount, "balance low");
+
+        allowance[from][msg.sender] = allowed - amount;
+        balanceOf[from] -= amount;
+        totalSupply -= amount;
+
+        emit Transfer(from, address(0), amount);
+    }
+}
 
 contract EvmBridge {
     WrappedToken public wrappedToken;
@@ -57,6 +79,16 @@ contract EvmBridge {
         bytes32 solanaUser,
         uint256 amount,
         address recipient
+    );
+
+    event BurnedToSolana(
+        bytes32 indexed messageId,
+        uint64 srcChainId,
+        uint64 dstChainId,
+        bytes32 indexed config,
+        uint64 nonce,
+        uint256 amount,
+        bytes32 solanaRecipient
     );
 
     error Unauthorized();
@@ -88,7 +120,6 @@ contract EvmBridge {
         relayer = _relayer;
     }
 
-
     function mintFromSolana(
         uint64 srcChainId,
         bytes32 config,
@@ -101,13 +132,7 @@ contract EvmBridge {
         require(amount > 0, "amount zero");
         require(recipient != address(0), "recipient zero");
 
-        bytes32 messageId = keccak256(
-            abi.encode(
-                srcChainId,
-                config,
-                nonce
-            )
-        );
+        bytes32 messageId = keccak256(abi.encode(srcChainId, config, nonce));
 
         if (processedMessages[messageId]) {
             revert AlreadyProcessed(messageId);
@@ -129,5 +154,44 @@ contract EvmBridge {
             recipient
         );
     }
-}
 
+    function burnWrapped(
+        uint64 dstChainId,
+        bytes32 config,
+        uint64 nonce,
+        uint256 amount,
+        bytes32 solanaRecipient
+    ) external {
+        require(amount > 0, "amount zero");
+        require(solanaRecipient != bytes32(0), "recipient zero");
+
+        bytes32 messageId = keccak256(
+            abi.encode(
+                block.chainid,
+                dstChainId,
+                config,
+                nonce,
+                amount,
+                solanaRecipient
+            )
+        );
+
+        // why we need it here eventually we will be calling directly from onchain ?
+        if (processedMessages[messageId]) {
+            revert AlreadyProcessed(messageId);
+        }
+        processedMessages[messageId] = true;
+
+        wrappedToken.burnFrom(msg.sender, amount);
+
+        emit BurnedToSolana(
+            messageId,
+            uint64(block.chainid),
+            dstChainId,
+            config,
+            nonce,
+            amount,
+            solanaRecipient
+        );
+    }
+}
