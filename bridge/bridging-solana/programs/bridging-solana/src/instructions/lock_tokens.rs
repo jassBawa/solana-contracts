@@ -11,12 +11,13 @@ pub fn lock_tokens(
     amount: u64,
     destination_address: [u8; 20],
 ) -> Result<()> {
-    require!(amount > 0, ErrorCode::InvalidAmount);
-
     let config = &mut ctx.accounts.config;
     let user = &ctx.accounts.user;
     let user_token_ata = &ctx.accounts.user_token_account;
     let token_vault = &ctx.accounts.token_vault;
+
+    require!(config.paused, ErrorCode::BridgePaused);
+    require!(amount > 0, ErrorCode::InvalidAmount);
 
     // transfer from user to vault
     let transfer_ctx = CpiContext::new(
@@ -90,6 +91,7 @@ pub struct LockTokens<'info> {
     )]
     pub token_vault: Account<'info, TokenAccount>,
 
+    // everytime new record pda is created
     #[account(
         init,
         payer = user,
