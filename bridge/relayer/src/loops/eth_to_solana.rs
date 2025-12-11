@@ -55,7 +55,6 @@ pub async fn eth_to_solana_loop() -> Result<()> {
         }
         Err(_) => {
             let current = provider.get_block_number().await?;
-            // Use last 100 blocks as fallback to avoid missing events
             let fallback = current.saturating_sub(U64::from(100));
             println!(
                 " No EVM_START_BLOCK set, using current block - 100: {}",

@@ -7,3 +7,9 @@ libs = ["lib"]
 remappings = [
   "@openzeppelin/=lib/openzeppelin-contracts/"
 ]
+
+# Allow writing to deployment.json in the root directory
+fs_permissions = [
+  { access = "write", path = "./deployment.json" },
+  { access = "write", path = "./deployments" }
+]
