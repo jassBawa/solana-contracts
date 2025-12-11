@@ -148,7 +148,6 @@ describe("lock_tokens", () => {
   });
 
   it("Successfully locks tokens 5 times and verifies nonce increments", async () => {
-    console.log("\n Starting 5 consecutive lock operations\n");
     console.log("Config PDA:", configPda.toString());
     console.log("User:", user.publicKey.toString());
     console.log("Token Mint:", tokenMint.publicKey.toString());
@@ -159,7 +158,6 @@ describe("lock_tokens", () => {
     let initialNonce = configBefore.nonce.toNumber();
     let expectedNonce = initialNonce;
 
-    console.log(`Initial nonce: ${initialNonce}\n`);
 
     // Get initial balances
     const vaultBefore = await getAccount(provider.connection, tokenVaultPda);
@@ -170,18 +168,13 @@ describe("lock_tokens", () => {
     const initialVaultBalance = Number(vaultBefore.amount);
     const initialUserBalance = Number(userAccountBefore.amount);
     let vaultBalanceBefore = initialVaultBalance;
-    let userBalanceBefore = initialUserBalance;
-
-    console.log(`Initial balances:`);
-    console.log(`  User: ${initialUserBalance}`);
-    console.log(`  Vault: ${initialVaultBalance}\n`);
+    // let userBalanceBefore = initialUserBalance;
 
     const lockRecords: PublicKey[] = [];
     const destinationAddresses: Buffer[] = [];
 
     // Perform 5 lock operations
     for (let i = 0; i < 5; i++) {
-      console.log(`--- Lock Operation ${i + 1}/5 ---`);
 
       const destinationAddress = Buffer.from(
         `0x${(i + 1).toString().padStart(2, "0").repeat(20)}`.slice(2),
@@ -268,7 +261,6 @@ describe("lock_tokens", () => {
       tokenVaultPda
     );
 
-    console.log("Final State");
     console.log(`Final nonce: ${finalConfig.nonce.toNumber()}`);
     console.log(`Expected nonce: ${initialNonce + 5}`);
     console.log(`Final user balance: ${Number(finalUserAccount.amount)}`);
@@ -288,11 +280,6 @@ describe("lock_tokens", () => {
       const lockRecord = await program.account.lockRecord.fetch(lockRecords[i]);
       expect(lockRecord.nonce.toNumber()).to.equal(initialNonce + i);
       expect(lockRecord.amount.toNumber()).to.equal(lockAmount.toNumber());
-      console.log(
-        `  Lock ${
-          i + 1
-        }: Nonce ${lockRecord.nonce.toNumber()}, Amount ${lockRecord.amount.toString()}`
-      );
     }
 
     console.log("\n All 5 lock operations completed successfully!");

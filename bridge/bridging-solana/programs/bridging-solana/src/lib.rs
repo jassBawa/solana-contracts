@@ -37,4 +37,16 @@ pub mod bridging_solana {
     ) -> Result<()> {
         instructions::unlock_from_evm(ctx, src_chain_id, nonce, amount)
     }
+
+    pub fn pause_bridge(
+        ctx: Context<PauseBridge>
+    ) -> Result<()>{
+        instructions::pause_bridge(ctx)
+    }
+
+    pub fn resume_bridge(
+        ctx: Context<ResumeBridge>
+    ) -> Result<()>{
+        instructions::resume_bridge(ctx)
+    }
 }

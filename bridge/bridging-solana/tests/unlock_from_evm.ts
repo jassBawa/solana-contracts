@@ -26,7 +26,7 @@ describe("unlock from evm", () => {
   let unauthorizedRelayer: Keypair;
   let recipient: Keypair;
   let configPda: PublicKey;
-  let vaultAuthhorityPda: PublicKey;
+  let vaultAuthorityPda: PublicKey;
   let tokenVaultPda: PublicKey;
   let recipientTokenAccount: PublicKey;
 
@@ -66,19 +66,25 @@ describe("unlock from evm", () => {
     );
     await provider.connection.confirmTransaction(recipientAirdrop);
 
+    const unauthorizedRelayerAirdrop = await provider.connection.requestAirdrop(
+      unauthorizedRelayer.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    await provider.connection.confirmTransaction(unauthorizedRelayerAirdrop);
+
     [configPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("bridge"), tokenMint.publicKey.toBuffer()],
       program.programId
     );
 
-    [vaultAuthhorityPda] = PublicKey.findProgramAddressSync(
+    [vaultAuthorityPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), configPda.toBuffer()],
       program.programId
     );
 
     tokenVaultPda = await getAssociatedTokenAddress(
       tokenMint.publicKey,
-      vaultAuthhorityPda,
+      vaultAuthorityPda,
       true
     );
 
@@ -155,68 +161,187 @@ describe("unlock from evm", () => {
     }
   });
 
-  describe("Successfull unlock", () => {
-    it("Successfull unlock tokens from evm bridge", async () => {
-      const processedMessagePda = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("processed"),
-          srcChainId.toArrayLike(Buffer, "le", 8),
-          nonce.toArrayLike(Buffer, "le", 8),
-        ],
-        program.programId
-      )[0];
+  it("Successfull unlock tokens from evm bridge", async () => {
+    const processedMessagePda = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("processed"),
+        srcChainId.toArrayLike(Buffer, "le", 8),
+        nonce.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    )[0];
 
-      const vaultBefore = await getAccount(provider.connection, tokenVaultPda);
-      const recipientBefore = await getAccount(
-        provider.connection,
-        recipientTokenAccount
-      );
-      const vaultBalanceBefore = Number(vaultBefore.amount);
-      const recipientBalanceBefore = Number(recipientBefore?.amount || 0);
+    const vaultBefore = await getAccount(provider.connection, tokenVaultPda);
+    const recipientBefore = await getAccount(
+      provider.connection,
+      recipientTokenAccount
+    );
+    const vaultBalanceBefore = Number(vaultBefore.amount);
+    const recipientBalanceBefore = Number(recipientBefore?.amount || 0);
 
-      console.log(`Vault balance before: ${vaultBalanceBefore}`);
-      console.log(`Recipient balance before: ${recipientBalanceBefore}`);
+    // console.log(`Vault balance before: ${vaultBalanceBefore}`);
+    // console.log(`Recipient balance before: ${recipientBalanceBefore}`);
 
-      const tx = await program.methods
-        .unlockFromEvm(srcChainId, nonce, unlockAmount)
+    const tx = await program.methods
+      .unlockFromEvm(srcChainId, nonce, unlockAmount)
+      .accounts({
+        relayer: relayer.publicKey,
+        config: configPda,
+        processedMessage: processedMessagePda,
+        vaultAuthority: vaultAuthorityPda,
+        tokenVault: tokenVaultPda,
+        recipientTokenAccount: recipientTokenAccount,
+        recipient: recipient.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([relayer])
+      .rpc();
+
+    // console.log(`Unlock transaction: ${tx}`);
+
+    const processedMessage = await program.account.processedMessage.fetch(
+      processedMessagePda
+    );
+    expect(processedMessage.executed).to.be.true;
+
+    const vaultAfter = await getAccount(provider.connection, tokenVaultPda);
+    const recipientAfter = await getAccount(
+      provider.connection,
+      recipientTokenAccount
+    );
+    const vaultBalanceAfter = Number(vaultAfter.amount);
+    const recipientBalanceAfter = Number(recipientAfter.amount);
+
+    // console.log(`Vault balance after: ${vaultBalanceAfter}`);
+    // console.log(`Recipient balance after: ${recipientBalanceAfter}`);
+
+    expect(vaultBalanceAfter).to.equal(
+      vaultBalanceBefore - unlockAmount.toNumber()
+    );
+    expect(recipientBalanceAfter).to.equal(
+      recipientBalanceBefore + unlockAmount.toNumber()
+    );
+  });
+
+  it("Fails to unlock with the same nonce twice", async () => {
+    const processedMessagePda = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("processed"),
+        srcChainId.toArrayLike(Buffer, "le", 8),
+        nonce.toArrayLike(Buffer, "le", 8)
+      ], program.programId
+    )[0];
+
+    try {
+      await program.methods.unlockFromEvm(srcChainId, nonce, unlockAmount).accounts({
+        relayer: relayer.publicKey,
+        config: configPda,
+        processedMessage: processedMessagePda,
+        vaultAuthority: vaultAuthorityPda,
+        tokenVault: tokenVaultPda,
+        recipientTokenAccount: recipientTokenAccount,
+        recipient: recipient.publicKey,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      }).signers([relayer]).rpc();
+
+      expect.fail("Should have thrown an error");
+    } catch (err) {
+      expect(err).to.be.instanceOf(Error);
+      expect(err.toString()).to.include("AlreadyProcessed");
+    }
+  })
+
+  it("Fails when unauthorized relayer tries to unlock", async () => {
+    const newNonce = new anchor.BN(100);
+    const processedMessagePda = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("processed"),
+        srcChainId.toArrayLike(Buffer, "le", 8),
+        newNonce.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    )[0];
+
+    try {
+      await program.methods
+        .unlockFromEvm(srcChainId, newNonce, unlockAmount)
         .accounts({
-          relayer: relayer.publicKey,
+          relayer: unauthorizedRelayer.publicKey,
           config: configPda,
           processedMessage: processedMessagePda,
-          vaultAuthority: vaultAuthhorityPda,
+          vaultAuthority: vaultAuthorityPda,
           tokenVault: tokenVaultPda,
           recipientTokenAccount: recipientTokenAccount,
           recipient: recipient.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
-        })
+        } as any)
+        .signers([unauthorizedRelayer])
+        .rpc();
+
+      expect.fail("Should have thrown an error");
+    } catch (err) {
+      expect(err).to.be.instanceOf(Error);
+      expect(err.toString()).to.include("Unauthorized");
+    }
+  });
+
+  it("Fails to unlock when bridge is paused", async () => {
+    // Pause the bridge first
+    await program.methods
+      .pauseBridge()
+      .accounts({
+        admin: admin.publicKey,
+        config: configPda,
+      } as any)
+      .signers([admin])
+      .rpc();
+
+    const pausedNonce = new anchor.BN(200);
+    const processedMessagePda = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("processed"),
+        srcChainId.toArrayLike(Buffer, "le", 8),
+        pausedNonce.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    )[0];
+
+    try {
+      await program.methods
+        .unlockFromEvm(srcChainId, pausedNonce, unlockAmount)
+        .accounts({
+          relayer: relayer.publicKey,
+          config: configPda,
+          processedMessage: processedMessagePda,
+          vaultAuthority: vaultAuthorityPda,
+          tokenVault: tokenVaultPda,
+          recipientTokenAccount: recipientTokenAccount,
+          recipient: recipient.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        } as any)
         .signers([relayer])
         .rpc();
 
-      console.log(`Unlock transaction: ${tx}`);
+      expect.fail("Should have thrown an error");
+    } catch (err) {
+      expect(err).to.be.instanceOf(Error);
+      expect(err.toString()).to.include("BridgePaused");
+    }
 
-      const processedMessage = await program.account.processedMessage.fetch(
-        processedMessagePda
-      );
-      expect(processedMessage.executed).to.be.true;
-
-      const vaultAfter = await getAccount(provider.connection, tokenVaultPda);
-      const recipientAfter = await getAccount(
-        provider.connection,
-        recipientTokenAccount
-      );
-      const vaultBalanceAfter = Number(vaultAfter.amount);
-      const recipientBalanceAfter = Number(recipientAfter.amount);
-
-      console.log(`Vault balance after: ${vaultBalanceAfter}`);
-      console.log(`Recipient balance after: ${recipientBalanceAfter}`);
-
-      expect(vaultBalanceAfter).to.equal(
-        vaultBalanceBefore - unlockAmount.toNumber()
-      );
-      expect(recipientBalanceAfter).to.equal(
-        recipientBalanceBefore + unlockAmount.toNumber()
-      );
-    });
+    // Resume bridge for other tests
+    await program.methods
+      .resumeBridge()
+      .accounts({
+        admin: admin.publicKey,
+        config: configPda,
+      } as any)
+      .signers([admin])
+      .rpc();
   });
+
 });
+
