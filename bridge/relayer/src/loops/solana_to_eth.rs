@@ -125,7 +125,7 @@ fn build_bridge_message(
         token_mint: config.token_mint.to_bytes(),
         user: lock.user.to_bytes(),
         amount: lock.amount,
-        destination_address: config.destination_bridge,
+        destination_address: lock.destination_address,
     }
 }
 
