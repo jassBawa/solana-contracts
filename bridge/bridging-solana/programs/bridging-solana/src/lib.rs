@@ -28,4 +28,13 @@ pub mod bridging_solana {
     ) -> Result<()> {
         instructions::lock_tokens(ctx, amount, destination_address)
     }
+
+    pub fn unlock_from_evm(
+        ctx: Context<UnlockFromEvm>,
+        src_chain_id: u64,
+        nonce: u64,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::unlock_from_evm(ctx, src_chain_id, nonce, amount)
+    }
 }

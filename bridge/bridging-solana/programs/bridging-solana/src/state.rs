@@ -23,3 +23,9 @@ pub struct LockRecord {
     pub destination_address: [u8; 20],
     pub created_at_slot: u64,
 }
+
+#[account]
+#[derive(InitSpace)]
+pub struct ProcessedMessage {
+    pub executed: bool,
+}

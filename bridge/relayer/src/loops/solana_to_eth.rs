@@ -28,7 +28,16 @@ pub async fn solana_to_eth_loop() -> Result<()> {
     let rpc_url = std::env::var("SOLANA_RPC_URL").expect("SOLANA_RPC_URL not set");
     let rpc_client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
-    let mut last_processed_nonce = 0;
+    let mut last_processed_nonce: u64 = match std::env::var("SOLANA_START_NONCE") {
+        Ok(nonce_str) => nonce_str.parse().unwrap_or_else(|_| {
+            eprintln!("Invalid SOLANA_START_NONCE, using 0");
+            0
+        }),
+        Err(_) => {
+            println!(" No SOLANA_START_NONCE set, starting from nonce 0");
+            0
+        }
+    };
 
     loop {
         if let Err(err) = process_new_locks(&rpc_client, &mut last_processed_nonce).await {
@@ -104,7 +113,6 @@ fn build_bridge_message(
     lock: &LockRecord,
     config_pubkey: Pubkey,
 ) -> BridgeMessage {
-    // this source_chain_id should come from env
     let source_chain_id: u64 = std::env::var("SRC_CHAIN_ID")
         .expect("SRC_CHAIN_ID not set")
         .parse()
@@ -154,7 +162,6 @@ async fn submit_to_evm(msg: &BridgeMessage) -> Result<()> {
         ),
     )?;
 
-    // this only send the tx onchain
     let pending_tx = tx.send().await?;
 
     // await until the transaction is not failed or processed onchain

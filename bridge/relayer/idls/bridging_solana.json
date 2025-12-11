@@ -91,10 +91,6 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "rent",
-          "address": "SysvarRent111111111111111111111111111111111"
-        },
-        {
           "name": "associated_token_program",
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
@@ -207,6 +203,85 @@
           }
         }
       ]
+    },
+    {
+      "name": "unlock_from_evm",
+      "discriminator": [63, 207, 111, 26, 166, 234, 19, 98],
+      "accounts": [
+        {
+          "name": "relayer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [98, 114, 105, 100, 103, 101]
+              },
+              {
+                "kind": "account",
+                "path": "config.token_mint",
+                "account": "BridgeConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "processed_message",
+          "writable": true
+        },
+        {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [118, 97, 117, 108, 116]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_vault",
+          "writable": true
+        },
+        {
+          "name": "recipient_token_account",
+          "writable": true
+        },
+        {
+          "name": "recipient"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "src_chain_id",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -217,6 +292,10 @@
     {
       "name": "LockRecord",
       "discriminator": [157, 145, 17, 26, 171, 35, 61, 131]
+    },
+    {
+      "name": "ProcessedMessage",
+      "discriminator": [9, 46, 230, 245, 67, 156, 226, 235]
     }
   ],
   "events": [
@@ -235,6 +314,36 @@
       "code": 6001,
       "name": "InvalidAmount",
       "msg": "Amount must be greater than zero"
+    },
+    {
+      "code": 6002,
+      "name": "UnauthorizedAdmin",
+      "msg": "You are not admin"
+    },
+    {
+      "code": 6003,
+      "name": "BridgePaused",
+      "msg": "Bridge is Paused"
+    },
+    {
+      "code": 6004,
+      "name": "AlreadyPaused",
+      "msg": "Bridge locking is paused"
+    },
+    {
+      "code": 6005,
+      "name": "NotPaused",
+      "msg": "Bridge is not paused"
+    },
+    {
+      "code": 6006,
+      "name": "Unauthorized",
+      "msg": "Unauthorized caller"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyProcessed",
+      "msg": "Message already processed"
     }
   ],
   "types": [
@@ -272,6 +381,10 @@
           {
             "name": "relayer_pubkey",
             "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }
@@ -336,6 +449,18 @@
           {
             "name": "created_at_slot",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProcessedMessage",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "executed",
+            "type": "bool"
           }
         ]
       }

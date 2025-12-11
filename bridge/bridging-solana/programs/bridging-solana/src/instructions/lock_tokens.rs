@@ -16,7 +16,7 @@ pub fn lock_tokens(
     let user_token_ata = &ctx.accounts.user_token_account;
     let token_vault = &ctx.accounts.token_vault;
 
-    require!(config.paused, ErrorCode::BridgePaused);
+    require!(!config.paused, ErrorCode::BridgePaused);
     require!(amount > 0, ErrorCode::InvalidAmount);
 
     // transfer from user to vault

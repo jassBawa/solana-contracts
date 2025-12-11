@@ -19,4 +19,9 @@ pub enum ErrorCode {
 
     #[msg("Bridge is not paused")]
     NotPaused,
+
+    #[msg("Unauthorized caller")]
+    Unauthorized,
+    #[msg("Message already processed")]
+    AlreadyProcessed,
 }
