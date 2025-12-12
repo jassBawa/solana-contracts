@@ -1,20 +1,25 @@
 # Solana ↔ EVM Bridge
 
-A cross-chain bridge enabling token transfers from Solana to EVM-compatible chains (e.g., Ethereum, Base, Arbitrum).
+A bidirectional bridge that lets you move tokens between Solana and EVM chains (like Ethereum, Base, Arbitrum). Lock tokens on Solana, get wrapped tokens on EVM. Burn wrapped tokens on EVM, unlock the originals back on Solana.
 
-## Overview
+## What This Does
 
-This bridge allows users to lock tokens on Solana and receive wrapped tokens on EVM chains. The system consists of three main components:
+Think of it like a two-way token bridge:
+- **Solana → EVM**: Lock your tokens on Solana, get equivalent wrapped tokens on EVM
+- **EVM → Solana**: Burn wrapped tokens on EVM, unlock the original tokens from the Solana vault
 
-1. **Solana Program** - Handles token locking on Solana
-2. **EVM Bridge Contract** - Mints wrapped tokens on EVM chains
-3. **Relayer Service** - Monitors Solana events and relays messages to EVM
+The whole system has three parts:
+1. **Solana Program** - Where users lock/unlock tokens. Uses PDAs (Solana's deterministic addresses) for security.
+2. **EVM Bridge Contract** - Handles minting/burning wrapped tokens. Has admin controls for emergency situations.
+3. **Relayer** - Off-chain service that watches both chains and forwards transactions. Written in Rust.
 
 ## Architecture
 
-### Overall Flow
+### Overall Flow (Bidirectional)
 
 > **Note:** Mermaid diagrams render automatically on GitHub. For local preview, use a markdown viewer with Mermaid support (e.g., VS Code with Mermaid extension, or view on GitHub).
+
+#### Solana → EVM Flow (Lock & Mint)
 
 ```mermaid
 sequenceDiagram
@@ -28,15 +33,44 @@ sequenceDiagram
     User->>SolanaProgram: lock_tokens(amount, destination_address)
     SolanaProgram->>Vault: Transfer tokens to vault
     SolanaProgram->>SolanaProgram: Create LockRecord with nonce
+    SolanaProgram->>SolanaProgram: Increment global nonce
     SolanaProgram-->>User: Emit BridgeLockEvent
     
-    Relayer->>SolanaProgram: Poll for new LockRecords (by nonce)
+    Relayer->>SolanaProgram: Poll for new nonces
     SolanaProgram-->>Relayer: Return new LockRecord data
     
-    Relayer->>EVMBridge: mintFromSolana(message_data)
-    EVMBridge->>EVMBridge: Verify replay protection
+    Relayer->>EVMBridge: mintFromSolana(srcChainId, config, nonce, ...)
+    EVMBridge->>EVMBridge: Verify replay protection (messageId)
     EVMBridge->>WrappedToken: mint(recipient, amount)
     WrappedToken-->>User: Wrapped tokens minted
+```
+
+#### EVM → Solana Flow (Burn & Unlock)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant WrappedToken as "Wrapped Token (EVM)"
+    participant EVMBridge as "EVM Bridge Contract"
+    participant Relayer as "Relayer Service"
+    participant SolanaProgram as "Solana Bridge Program"
+    participant Vault as "Token Vault (Solana)"
+
+    User->>WrappedToken: approve(EVMBridge, amount)
+    User->>EVMBridge: burnWrapped(dstChainId, config, amount, solanaRecipient)
+    EVMBridge->>EVMBridge: Increment burnNonce
+    EVMBridge->>EVMBridge: Verify replay protection (messageId)
+    EVMBridge->>WrappedToken: burnFrom(user, amount)
+    EVMBridge-->>Relayer: Emit BurnedToSolana event
+    
+    Relayer->>EVMBridge: Poll for BurnedToSolana events
+    EVMBridge-->>Relayer: Return event data
+    
+    Relayer->>SolanaProgram: unlock_from_evm(srcChainId, nonce, amount)
+    SolanaProgram->>SolanaProgram: Verify replay protection (ProcessedMessage PDA)
+    SolanaProgram->>SolanaProgram: Validate relayer authorization
+    SolanaProgram->>Vault: Transfer tokens from vault
+    SolanaProgram-->>User: Original tokens unlocked
 ```
 
 ### Solana Account Model
@@ -75,30 +109,32 @@ graph TB
 
 #### Solana Account Details
 
-**BridgeConfig (PDA)**
-- **Seeds**: `["bridge", token_mint]`
-- **Fields**:
-  - `admin: Pubkey` - Admin wallet address
-  - `token_mint: Pubkey` - SPL Token mint address
-  - `vault_authority_bump: u8` - Bump seed for vault authority PDA
-  - `nonce: u64` - Global nonce counter for lock records
-  - `destination_chain_id: u64` - Target EVM chain ID
-  - `destination_bridge: [u8; 20]` - EVM bridge contract address
-  - `relayer_pubkey: Pubkey` - Relayer wallet on Solana
+**BridgeConfig (PDA)** - The main config account stored on Solana
+- **How it's found**: PDA with seeds `["bridge", token_mint]` - deterministic, can't be guessed
+- **What it stores**:
+  - `admin` - Who can pause the bridge or change settings
+  - `token_mint` - Which SPL token this bridge handles
+  - `nonce` - Counter that goes up each time someone locks tokens (prevents replay attacks)
+  - `destination_bridge` - The EVM contract address (20 bytes)
+  - `relayer_pubkey` - Which wallet is allowed to call unlock_from_evm
+  - `paused` - Emergency stop switch
 
-**Token Vault (Associated Token Account)**
-- **Authority**: Vault Authority PDA (seeds: `["vault", config_pubkey]`)
-- **Purpose**: Holds all locked tokens from users
+**Token Vault** - Where all locked tokens live
+- It's an Associated Token Account owned by a PDA (not a regular wallet)
+- When you lock tokens, they go here. When unlocking from EVM, tokens come from here.
 
-**LockRecord (PDA)**
-- **Seeds**: `["lock", config_pubkey, nonce.to_le_bytes()]`
-- **Fields**:
-  - `config: Pubkey` - Reference to BridgeConfig
-  - `nonce: u64` - Sequential nonce
-  - `user: Pubkey` - User who locked tokens
-  - `amount: u64` - Amount locked
-  - `destination_address: [u8; 20]` - EVM recipient address
-  - `created_at_slot: u64` - Solana slot when locked
+**LockRecord (PDA)** - One record per lock operation
+- **How it's found**: PDA with seeds `["lock", config_pubkey, nonce]`
+- **What it stores**:
+  - Which user locked tokens
+  - How much they locked
+  - Where on EVM they want the wrapped tokens sent (destination_address)
+  - The nonce at time of lock
+
+**ProcessedMessage (PDA)** - Prevents double-unlocking
+- When the relayer unlocks tokens from an EVM burn, we create this PDA
+- Seeds: `["processed", src_chain_id, nonce]` - unique per unlock attempt
+- Stops the same burn event from being processed twice
 
 ### EVM Contract Model
 
@@ -118,18 +154,30 @@ graph TB
 
 #### EVM Contract Details
 
-**EvmBridge Contract**
-- **Admin**: Can update relayer address
-- **Relayer**: Only address that can call `mintFromSolana`
-- **Replay Protection**: `processedMessages` mapping prevents duplicate message processing
-- **Message ID**: `keccak256(srcChainId, config, nonce)`
+**EvmBridge Contract** - The main bridge contract on EVM
 
-**WrappedToken Contract**
-- **Name**: "Wrapped Solana Token"
-- **Symbol**: "wSOLT"
-- **Decimals**: 18
-- **Minter**: EvmBridge contract (only minter can mint)
-- **Standard**: ERC-20 compatible
+Who can do what:
+- **Admin**: Can change admin, update relayer, pause everything
+- **Relayer**: Only one allowed to call `mintFromSolana` (when tokens come from Solana)
+- **Anyone**: Can call `burnWrapped` to send tokens back to Solana
+
+Security:
+- Uses `processedMessages` mapping to prevent replay attacks
+  - Each message gets a unique ID based on `keccak256(chainId, config, nonce, ...)`
+  - Once processed, that ID is marked and can't be used again
+- Has a `burnNonce` that auto-increments (with overflow check)
+- Can be paused by admin for emergencies
+
+**Main Functions**:
+- `mintFromSolana(...)` - Only relayer can call this. Mints wrapped tokens when user locks on Solana.
+- `burnWrapped(...)` - Anyone can call. Burns wrapped tokens and emits event for relayer to see.
+- `pause()` / `unpause()` - Admin only. Emergency stop.
+- `setAdmin()` / `setRelayer()` - Admin only. Update who's in charge.
+
+**WrappedToken** - Standard ERC-20 token
+- Full ERC-20 implementation (transfer, approve, etc.)
+- Only the EvmBridge contract can mint new tokens
+- When you burn, tokens are destroyed and an unlock happens on Solana
 
 ### Data Flow
 
@@ -180,97 +228,107 @@ graph LR
 
 ### 1. Solana Program (`bridging-solana/`)
 
-**Program ID**: `F5qk3bMoRNyZao5RciKt7X5BN44wg93p6ExE5qwSi4Ww`
+Program ID: `F5qk3bMoRNyZao5RciKt7X5BN44wg93p6ExE5qwSi4Ww`
 
-**Instructions**:
-- `initialize` - Initializes bridge configuration for a token
-- `lock_tokens` - Locks tokens and creates a lock record
+**What it does**:
+- `initialize` - Sets up a new bridge for a specific token (admin only, one-time setup)
+- `lock_tokens` - User locks tokens, they go to vault, we create a LockRecord
+- `unlock_from_evm` - Relayer calls this when someone burns on EVM. Transfers from vault to user.
+- `pause_bridge` / `resume_bridge` - Admin can stop everything if needed
 
-**Key Features**:
-- Uses PDAs (Program Derived Addresses) for deterministic account generation
-- Nonce-based ordering ensures no gaps in lock records
-- Event emission for off-chain monitoring
-- Vault authority controlled by PDA (no single point of failure)
+**Why it's secure**:
+- Everything uses PDAs - addresses derived deterministically, can't be guessed or controlled by a single key
+- Each lock increments a nonce, so we always know the order things happened
+- Can't unlock the same burn twice (ProcessedMessage PDA tracks what's been done)
+- Vault is controlled by a PDA, not a regular wallet (more secure)
 
-**Technology Stack**:
-- Anchor framework
-- Rust
-- SPL Token program
+**Tech**: Anchor framework (makes Solana development easier), Rust, SPL Token program
 
 ### 2. EVM Bridge Contract (`evm-bridge/`)
 
-**Key Features**:
-- Replay protection via message ID tracking
-- Admin-controlled relayer updates
-- Automatic wrapped token deployment
-- Event emission for monitoring
+**What it does**:
+- When tokens come from Solana: relayer calls `mintFromSolana`, we mint wrapped tokens
+- When user wants to go back: user calls `burnWrapped`, we burn tokens and emit event
+- Deploys the wrapped token automatically in constructor
 
-**Functions**:
-- `mintFromSolana` - Relayer-only function to mint wrapped tokens
-- `setRelayer` - Admin-only function to update relayer address
+**Security stuff**:
+- Every message has a unique ID - can't process the same one twice
+- Admin can pause everything or change who the relayer is
+- Nonce has overflow protection (won't break if we hit max uint64)
 
-**Technology Stack**:
-- Solidity ^0.8.13
-- Foundry for development and testing
+**Tech**: Solidity 0.8.13, Foundry for testing
 
 ### 3. Relayer Service (`relayer/`)
 
-**Functionality**:
-- Monitors Solana bridge config for new nonces
-- Fetches LockRecord PDAs for each new nonce
-- Builds bridge messages with all required data
-- Submits transactions to EVM bridge contract
+**What it does** - runs two loops simultaneously:
 
-**Key Features**:
-- Nonce-based processing ensures order
-- Error handling and retry logic
-- Configurable polling interval (10 seconds default)
+**Loop 1: Solana → EVM**
+- Checks Solana config's nonce every 5 seconds
+- If nonce increased, finds new LockRecords
+- Builds the message and calls `mintFromSolana` on EVM
+- If it fails, retries next cycle
 
-**Technology Stack**:
-- Rust
-- Anchor client libraries
-- Ethers.rs for EVM interaction
-- Solana RPC client
+**Loop 2: EVM → Solana**
+- Listens for `BurnedToSolana` events on EVM
+- Validates the data (chain ID matches, config matches, etc.)
+- Builds Solana instruction and calls `unlock_from_evm`
+- Tracks which block we've seen up to (so we don't miss events)
 
-## Security Features
+**Features**:
+- Can restart from where it left off (env vars for starting nonce/block)
+- Validates everything before submitting (doesn't trust the event data blindly)
+- Uses Anchor's generated code so types match exactly
+- Handles errors gracefully - if one fails, keeps running the other loop
+
+**Tech**: Rust, Anchor client, ethers.rs for EVM, Solana RPC client
+
+## Security & Safety
 
 ### Solana Side
-- ✅ PDA-based vault authority (cannot be controlled by a single key)
-- ✅ Nonce-based ordering prevents message reordering
-- ✅ Anchor framework provides type safety and account validation
-- ✅ Configurable relayer address
+- Vault is a PDA, not a regular wallet key - more secure
+- Nonce increments for each lock, so we know the order (prevents replay/reordering)
+- Relayer must be authorized to unlock (can't just anyone call unlock_from_evm)
+- Can't unlock the same burn twice (ProcessedMessage PDA prevents it)
+- Admin can pause if something looks wrong
+- Checks for zero addresses (would be bad to send tokens to address(0))
 
 ### EVM Side
-- ✅ Replay protection via message ID mapping
-- ✅ Relayer-only minting function
-- ✅ Admin-controlled relayer updates
-- ✅ Zero address checks
+- Every message gets a unique ID - once processed, can't be processed again
+- Only the authorized relayer can mint (Solana → EVM direction)
+- Anyone can burn (EVM → Solana), but that's fine - they're burning their own tokens
+- Admin can change relayer or pause everything
+- Nonce overflow check (won't break at max uint64)
+- Standard ERC-20 for wrapped token (battle-tested code)
 
 ### Relayer
-- ⚠️ Currently stores last processed nonce in memory (should persist in production)
-- ⚠️ No signature verification yet (should verify Solana signatures in production)
+- Validates chain IDs and configs before submitting (doesn't trust blindly)
+- Can restart from last position (env vars remember where we were)
+- If one direction fails, other keeps running
+- Uses Anchor generated code (types match, less chance of bugs)
+- ⚠️ Should verify Solana transaction signatures in production (not done yet)
+- ⚠️ Should use a database instead of env vars for state in production
 
-## Current Implementation Status
+## What's Done vs What's Left
 
-### ✅ Completed
-- [x] Solana program with initialize and lock_tokens instructions
-- [x] EVM bridge contract with mintFromSolana function
-- [x] Wrapped token contract (ERC-20 compatible)
-- [x] Relayer service with nonce-based polling
-- [x] Deployment scripts for both chains
-- [x] Basic event emission and monitoring
+### ✅ Working Now
+- Full bidirectional bridge (Solana ↔ EVM)
+- All Solana instructions (lock, unlock, pause, resume)
+- All EVM functions (mint, burn, admin controls)
+- Relayer that monitors both directions
+- Replay protection on both sides
+- Basic tests for Solana program
+- Deployment scripts
 
-### 🚧 In Progress / TODO
-- [ ] Reverse bridge (EVM → Solana)
-- [ ] Signature verification in relayer
-- [ ] Persistent nonce storage for relayer
-- [ ] Error recovery and retry mechanisms
-- [ ] Comprehensive testing suite
-- [ ] Gas optimization
-- [ ] Security audits
-- [ ] Multi-chain support configuration
-- [ ] Rate limiting and spam protection
-- [ ] Admin emergency pause functionality
+### 🚧 Still To Do
+- More comprehensive tests (especially Foundry tests for EVM)
+- Integration tests (test the full flow end-to-end)
+- Production-ready relayer (database instead of env vars, signature verification)
+- Security audit (important before mainnet)
+- Gas optimization pass
+- Multi-chain support (handle multiple EVM chains)
+- Rate limiting (prevent spam)
+- Monitoring/alerting (know when something breaks)
+- CLI tool (easier for users to interact)
 
 ## Project Structure
 
@@ -283,23 +341,36 @@ bridge/
 │   │       │   ├── lib.rs           # Main program entry
 │   │       │   ├── state.rs         # Account state structures
 │   │       │   ├── instructions/
+│   │       │   │   ├── mod.rs
 │   │       │   │   ├── initialize.rs
-│   │       │   │   └── lock_tokens.rs
+│   │       │   │   ├── lock_tokens.rs
+│   │       │   │   ├── unlock_from_evm.rs
+│   │       │   │   ├── pause_bridge.rs
+│   │       │   │   └── resume_bridge.rs
 │   │       │   └── errors.rs
 │   └── tests/                # Anchor tests
+│       ├── initialize.ts
+│       ├── lock_tokens.ts
+│       ├── unlock_from_evm.ts
+│       └── pause_resume.ts
 │
 ├── evm-bridge/               # EVM smart contracts
 │   ├── src/
-│   │   └── EvmBridge.sol     # Main bridge contract + WrappedToken
+│   │   ├── EvmBridge.sol     # Main bridge contract
+│   │   └── WrappedToken.sol  # ERC-20 wrapped token
 │   ├── script/
 │   │   └── Deploy.s.sol      # Deployment script
 │   └── test/                 # Foundry tests
 │
 └── relayer/                  # Rust relayer service
     ├── src/
-    │   ├── main.rs           # Main relayer logic
+    │   ├── main.rs           # Main entry point (runs both loops)
+    │   ├── loops/
+    │   │   ├── solana_to_eth.rs  # Solana → EVM monitoring
+    │   │   └── eth_to_solana.rs  # EVM → Solana monitoring
     │   └── abis/             # EVM contract ABIs
-    └── idls/                 # Solana program IDLs
+    ├── idls/                 # Solana program IDLs
+    └── Cargo.toml
 ```
 
 ## Getting Started
@@ -319,30 +390,83 @@ See individual README files in each directory:
 
 ## Environment Variables
 
-### Relayer
-- `SOLANA_RPC_URL` - Solana RPC endpoint
+### Relayer Configuration
+
+**Required for Solana → EVM Loop:**
+- `SOLANA_RPC_URL` - Solana RPC endpoint (e.g., `http://localhost:8899`)
 - `BRIDGE_CONFIG_PUBKEY` - BridgeConfig PDA address
-- `SRC_CHAIN_ID` - Source chain ID (Solana)
-- `EVM_RPC_URL` - EVM chain RPC endpoint
-- `EVM_PRIVATE_KEY` - Relayer wallet private key
-- `EVM_CHAIN_ID` - Destination EVM chain ID
+- `SRC_CHAIN_ID` - Source chain ID (Solana chain ID, e.g., `1`)
+- `EVM_RPC_URL` - EVM chain RPC endpoint (e.g., `http://localhost:8545`)
+- `EVM_PRIVATE_KEY` - EVM relayer wallet private key (without `0x` prefix)
+- `EVM_CHAIN_ID` - Destination EVM chain ID (e.g., `31337` for local)
 - `EVM_BRIDGE_ADDRESS` - Deployed EvmBridge contract address
 
-## Message Format
+**Required for EVM → Solana Loop:**
+- `SOLANA_RPC_URL` - Solana RPC endpoint
+- `SOLANA_RELAYER_KEYPAIR` - Path to Solana relayer keypair file (e.g., `~/.config/solana/relayer-keypair.json`)
+- `BRIDGE_CONFIG_PUBKEY` - BridgeConfig PDA address
+- `SOLANA_CHAIN_ID` - Solana chain ID for validation (e.g., `1`)
+- `EVM_RPC_URL` - EVM chain RPC endpoint
+- `EVM_BRIDGE_ADDRESS` - Deployed EvmBridge contract address
 
-The bridge message structure passed from Solana to EVM:
+**Optional (for state persistence):**
+- `SOLANA_START_NONCE` - Starting nonce for Solana → EVM processing (default: `0`)
+- `EVM_START_BLOCK` - Starting block number for EVM → Solana processing (default: current block - 100)
 
-```rust
-struct BridgeMessage {
-    src_chain_id: u64,           // Source chain (Solana) ID
-    config: [u8; 32],            // BridgeConfig PDA pubkey
-    nonce: u64,                  // Sequential nonce
-    token_mint: [u8; 32],        // Solana token mint address
-    user: [u8; 32],              // Solana user pubkey
-    amount: u64,                 // Locked amount
-    destination_address: [u8; 20] // EVM recipient address
-}
+## How Messages Work
+
+### Solana → EVM (Lock & Mint)
+
+When someone locks tokens on Solana:
+1. LockRecord gets created with a nonce
+2. Relayer sees the nonce increased, reads the LockRecord
+3. Relayer calls EVM with this data:
+   - Source chain ID (Solana's ID)
+   - Config pubkey (which bridge config)
+   - Nonce (which lock this was)
+   - Token mint, user, amount
+   - **destination_address** - where on EVM to mint the wrapped tokens
+
+**Replay protection**: Message ID = `keccak256(srcChainId, config, nonce)`. Same nonce can't be processed twice.
+
+### EVM → Solana (Burn & Unlock)
+
+When someone burns wrapped tokens on EVM:
+1. They call `burnWrapped(dstChainId, config, amount, solanaRecipient)`
+2. Contract increments `burnNonce` and emits `BurnedToSolana` event
+3. Relayer sees the event, validates everything
+4. Relayer calls Solana `unlock_from_evm(srcChainId, nonce, amount)`
+5. Solana transfers from vault to the recipient
+
+**Replay protection**: ProcessedMessage PDA with seeds `["processed", srcChainId, nonce]`. Can't unlock the same nonce twice.
+
+## Testing & Running
+
+### Solana Tests
+```bash
+cd bridging-solana
+anchor test --skip-local-validator
 ```
+Tests cover: initialization, locking tokens, unlocking from EVM, pause/resume.
+
+### Deploy EVM Contract
+```bash
+cd evm-bridge
+export ADMIN_PRIVATE_KEY="0x..."
+export RELAYER_ADDRESS="0x..."
+forge script script/Deploy.s.sol:DeployScript \
+  --rpc-url http://localhost:8545 \
+  --broadcast \
+  --private-key $ADMIN_PRIVATE_KEY
+```
+
+### Run Relayer
+```bash
+cd relayer
+# Set env vars (see below)
+cargo run
+```
+Both loops run at the same time, checking every 5 seconds.
 
 ## License
 
