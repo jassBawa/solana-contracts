@@ -1,263 +1,124 @@
-# Automated Market Maker (AMM) on Solana
+# AMM Contract
 
-A decentralized exchange (DEX) implementation built on Solana using Anchor framework. This AMM enables token swaps, liquidity provision, and liquidity removal through a constant product formula (x * y = k).
+A simple automated market maker built on Solana. Lets you swap tokens, add liquidity to pools, and remove it when you want. Uses the constant product formula (x * y = k) to set prices.
 
-## Overview
+## What it does
 
-This AMM contract implements a Uniswap V2-style automated market maker on Solana. Users can:
-- Create liquidity pools for token pairs
-- Add liquidity to pools and receive LP (Liquidity Provider) tokens
-- Swap tokens at prices determined by the constant product formula
-- Remove liquidity by burning LP tokens
+This contract lets you:
+- Create pools for any two tokens
+- Add liquidity and get LP tokens back
+- Swap one token for another
+- Remove liquidity by burning your LP tokens
 
-## Architecture
+The price for swaps comes from the pool's reserves. More of one token in the pool means it's worth less, so you get more of the other token when swapping.
 
-### Program Structure
+## How it works
 
-The program is organized into several modules:
+### Creating an AMM
 
-- **State**: Defines the on-chain data structures (`Amm`, `Pool`)
-- **Instructions**: Contains all program instructions
-- **Constants**: Shared constants (seeds, minimum liquidity)
-- **Errors**: Custom error types
+First, you create an AMM instance with an admin and a fee. The fee is in basis points (500 = 5%).
 
-### Key Design Decisions
+### Creating a pool
 
-#### PDA-Based Architecture
+Once you have an AMM, you can create pools for token pairs. Each pool gets its own LP token mint. The pool stores the two token mints it's for.
 
-The contract uses Program Derived Addresses (PDAs) for deterministic account generation:
+### Adding liquidity
 
-- **AMM Account**: Stores AMM configuration (admin, fee)
-- **Pool Account**: Stores pool state (token pair, AMM reference)
-- **Pool Authority PDA**: Separate PDA used as authority for token accounts and LP mint
-- **Liquidity Mint PDA**: The LP token mint for each pool
+When you add liquidity, you deposit both tokens. On the first deposit, the contract uses `sqrt(amount_a * amount_b)` to figure out how many LP tokens to mint. After that, it uses the ratio of your deposit to the existing reserves.
 
-#### Why Separate Pool Authority?
+A small amount of liquidity (100 tokens) is locked forever on the first deposit. This prevents someone from draining the pool completely.
 
-The `pool` account is a data account that stores state, while `pool_authority` is a PDA used exclusively for signing transactions. This separation provides:
+### Swapping
 
-1. **Clear separation of concerns**: Data storage vs. signing authority
-2. **Flexibility**: Pool data can be read without requiring mutability for signing
-3. **Security**: Different PDAs for different purposes reduces attack surface
-4. **Best practices**: Follows Solana's recommended patterns for program design
+To swap, you send one token to the pool and get the other back. The contract:
+1. Takes a fee from your input
+2. Calculates output using the constant product formula
+3. Checks you're getting at least the minimum you asked for (slippage protection)
+4. Transfers the tokens
 
-Both are PDAs, but serve different roles:
-- `pool`: PDA that stores data (amm, mint_a, mint_b)
-- `pool_authority`: PDA used only for signing (no data storage)
+The formula: `(reserve_a + input) * (reserve_b - output) = reserve_a * reserve_b`
 
-## Features
+### Removing liquidity
 
-### 1. Create AMM
+Burn your LP tokens to get back your share of both tokens in the pool. The amounts are proportional to how much of the LP supply you're burning.
 
-Initializes a new AMM instance with an admin and trading fee.
+## Project structure
 
-```rust
-create_amm(id: Pubkey, fee: u16)
 ```
-
-- `id`: Unique identifier for the AMM
-- `fee`: Trading fee in basis points (e.g., 500 = 5%)
-
-### 2. Create Pool
-
-Creates a new liquidity pool for a token pair.
-
-```rust
-create_pool()
+programs/amm/src/
+├── lib.rs              # Main program entry point
+├── state.rs            # Amm and Pool account structs
+├── constants.rs        # Constants like MINIMUM_LIQUIDITY
+├── errors.rs           # Custom error types
+└── instructions/       # Instruction handlers
+    ├── create_amm.rs
+    ├── create_pool.rs
+    ├── deposit_liquidity.rs
+    ├── swap_tokens.rs
+    └── withdraw_liquidity.rs
 ```
-
-This instruction:
-- Initializes the pool account with token pair information
-- Creates the LP token mint with pool authority
-- Sets up token accounts for pool reserves
-- Derives all necessary PDAs
-
-### 3. Deposit Liquidity
-
-Add liquidity to a pool and receive LP tokens.
-
-```rust
-deposit_liquidity(amount_a: u64, amount_b: u64)
-```
-
-**Initial Deposit:**
-- Uses geometric mean formula: `liquidity = sqrt(amount_a * amount_b) - MINIMUM_LIQUIDITY`
-- Minimum liquidity is locked forever to prevent complete pool drainage
-
-**Subsequent Deposits:**
-- Calculates liquidity based on proportional share: `min(liquidity_from_a, liquidity_from_b)`
-- Automatically adjusts amounts to maintain pool ratio
-- Mints LP tokens to the depositor
-
-### 4. Swap Tokens
-
-Swap tokens using the constant product formula.
-
-```rust
-swap_tokens(swap_a: bool, input_amount: u64, min_output_amount: u64)
-```
-
-**Formula:** `(x + Δx) * (y - Δy) = x * y`
-
-- Applies trading fee to input amount
-- Calculates output using constant product formula
-- Validates minimum output amount (slippage protection)
-- Transfers tokens between user and pool
-
-### 5. Withdraw Liquidity
-
-Remove liquidity by burning LP tokens and receiving underlying tokens.
-
-```rust
-withdraw_liquidity(amount: u64)
-```
-
-- Calculates proportional share of pool reserves
-- Transfers tokens from pool to user
-- Burns LP tokens
-- Validates that withdrawal amounts are non-zero
-
-## Technologies
-
-### Core Stack
-
-- **Anchor Framework** (v0.32.1): Solana program framework
-- **Rust**: Program language
-- **TypeScript**: Test suite
-- **Solana SPL Token**: Token program integration
-
-### Key Libraries
-
-- `anchor-lang`: Core Anchor macros and types
-- `anchor-spl`: SPL token program integration
-- `fixed`: Fixed-point arithmetic for precise calculations
-- `@coral-xyz/anchor`: Anchor TypeScript client
-- `@solana/spl-token`: SPL token utilities
-
-### Testing
-
-- **Mocha**: Test framework
-- **Chai**: Assertion library
-- **ts-mocha**: TypeScript support for Mocha
-
-## State Structure
-
-### Amm Account
-
-```rust
-pub struct Amm {
-    pub id: Pubkey,      // Unique AMM identifier
-    pub admin: Pubkey,   // Admin address
-    pub fee: u16,        // Trading fee in basis points
-}
-```
-
-### Pool Account
-
-```rust
-pub struct Pool {
-    pub amm: Pubkey,     // Reference to AMM
-    pub mint_a: Pubkey,  // First token mint
-    pub mint_b: Pubkey,  // Second token mint
-}
-```
-
-## Constants
-
-- `MINIMUM_LIQUIDITY`: 100 (locked forever on first deposit)
-- `AUTHORITY_SEED`: "authority" (for pool authority PDA)
-- `LIQUIDITY_SEED`: "liquidity" (for LP mint PDA)
-
-## Error Handling
-
-The program defines custom errors for better debugging:
-
-- `InvalidFee`: Fee value is invalid
-- `InvalidMint`: Invalid mint for the pool
-- `DepositTooSmall`: Deposit amount too small
-- `OutputTooSmall`: Swap output below minimum
-- `InvariantViolated`: Constant product invariant violated
-- `InsufficientLiquidity`: Not enough LP tokens
-- `ZeroWithdrawal`: Withdrawal would result in zero tokens
 
 ## Setup
 
-### Prerequisites
-
+Make sure you have:
 - Rust (latest stable)
-- Solana CLI (v1.18+)
-- Anchor CLI (v0.32.1+)
+- Solana CLI
+- Anchor CLI
 - Node.js and Yarn
 
-### Installation
+Then:
 
 ```bash
-# Install dependencies
 yarn install
-
-# Build the program
 anchor build
-
-# Run tests
 anchor test
 ```
 
 ## Testing
 
-The test suite covers all major functionality:
-
-- AMM creation and validation
-- Pool creation with invalid mint checks
-- Liquidity deposits (equal amounts, zero amount validation)
-- Token swaps with slippage protection
-- Liquidity withdrawal
-
-Run tests with:
+Tests cover creating AMMs, pools, adding/removing liquidity, and swapping. Run them with:
 
 ```bash
 anchor test
 ```
 
-## Security Considerations
+## Technical details
 
-1. **Minimum Liquidity**: Prevents complete pool drainage
-2. **Slippage Protection**: Users can specify minimum output amounts
-3. **Ratio Validation**: Deposits automatically adjust to maintain pool ratio
-4. **PDA Verification**: All PDAs are verified using seeds and bumps
-5. **Access Control**: Only authorized accounts can perform operations
+### PDAs
 
-## Mathematical Formulas
+The contract uses Program Derived Addresses (PDAs) for:
+- The AMM account (stores admin and fee)
+- The pool account (stores token pair info)
+- The pool authority (signs for token transfers)
+- The LP token mint
 
-### Constant Product Formula
+### State
 
-For swaps: `(x + Δx) * (y - Δy) = x * y`
+**Amm account:**
+- `id`: Unique identifier
+- `admin`: Admin address
+- `fee`: Trading fee in basis points
 
-Where:
-- `x`, `y`: Current pool reserves
-- `Δx`: Input amount (after fee)
-- `Δy`: Output amount
+**Pool account:**
+- `amm`: Reference to the AMM
+- `mint_a`: First token mint
+- `mint_b`: Second token mint
 
-### Liquidity Calculation
+### Errors
 
-**Initial deposit:**
-```
-liquidity = sqrt(amount_a * amount_b) - MINIMUM_LIQUIDITY
-```
+- `InvalidFee`: Fee is 10000 or higher (100%)
+- `InvalidMint`: Wrong mint for the pool
+- `DepositTooSmall`: Deposit amount too small
+- `OutputTooSmall`: Swap output below minimum
+- `InvariantViolated`: Constant product check failed
+- `InsufficientLiquidity`: Not enough LP tokens
+- `ZeroWithdrawal`: Withdrawal would give zero tokens
 
-**Subsequent deposits:**
-```
-liquidity_from_a = (amount_a * lp_supply) / reserve_a
-liquidity_from_b = (amount_b * lp_supply) / reserve_b
-liquidity = min(liquidity_from_a, liquidity_from_b)
-```
+## Notes
 
-**Withdrawal:**
-```
-amount_a = (lp_amount * reserve_a) / (lp_supply + MINIMUM_LIQUIDITY)
-amount_b = (lp_amount * reserve_b) / (lp_supply + MINIMUM_LIQUIDITY)
-```
+- The contract uses fixed-point math for precise calculations
+- All PDAs are verified using seeds and bumps
+- Minimum liquidity prevents complete pool drainage
+- Slippage protection lets users set minimum output amounts
 
-## License
-
-ISC
-
+ISC License
